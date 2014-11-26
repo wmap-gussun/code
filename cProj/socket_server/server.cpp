@@ -14,13 +14,44 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <stdint.h>
 
-#define PORT "3490"  // the port users will be connecting to
+#define PORT "3490"  // The port users will be connecting to
 
-#define BACKLOG 10     // how many pending connections queue will hold
+#define MESSAGESIZE 1024 Max number of bytes per package
+#define PACKAGESIZE MESSAGESIZE+sizeof(uint32_t) // Size of package
 
 
-#define MAXDATASIZE 100 // max number of bytes we can get at once
+enum Protocol
+{
+	ACC,
+	NEW_MESSAGE
+};
+
+struct Package_new
+{
+	uint32_t type;
+	uint32_t parts;
+	uint32_t length;
+};
+struct Package_part
+{
+	uint32_t type;
+	char buf[MESSAGESIZE];
+};
+struct Package_acc
+{
+	uint32_t type;
+};
+
+union Package
+{
+	Package_new new_;
+	Package_part part_;
+	Package_acc acc_;
+	uint32_t type;
+	char buf[PACKAGESIZE];
+};
 
 /**
  * Keeps state of each connection
@@ -34,8 +65,8 @@ class Client
 		void read();
 	protected:
 		int fd; // Filedescriptor for socet
-		int state;
 		fd_set *connectionListPntr; // Pointer to main list of filedescriptors
+		Package readBuffer;
 };
 
 Client::Client(int myFd, fd_set *myFdList)
@@ -52,9 +83,8 @@ void Client::read()
 	// Check for info to read
 	if(FD_ISSET(fd, connectionListPntr))
 	{
-		char buf[256]; // Buffer for client data TODO: Diff on state
 		// Read from socket
-		int readBytes = recv(fd, buf, sizeof buf, 0);
+		int readBytes = recv(fd, readBuffer.buf, sizeof readBuffer.buf, 0);
 		if(readBytes <= 0)
 		{
 			// Got error or connection closed by client
@@ -72,8 +102,23 @@ void Client::read()
 		}
 		else
 		{
-			// We got some data from a client
-			printf("%s\n", buf);
+			if(readBuffer.type == 1) // New
+			{
+				printf("New message of %d parts with %d size\n", readBuffer.new_.parts, readBuffer.new_.size);
+				// Prepare for new message
+				// Send acc
+			}
+			elseif(readBuffer.type == 2) // Message part
+			{
+				printf("Message part %s\n", readBuffer.part_.buf);
+				// Send acc
+			}
+			elseif(readBuffer.type == 3) // Acc
+			{
+				// Send worked!
+				// Send next message if any
+			}
+
 			// send to everyone!
 			/*
 			for(j = 0; j <= fdmax; j++)
@@ -96,7 +141,9 @@ void Client::read()
 }
 
 
-
+// SEND
+// Check cwreceive (state == META && messages.length == 0) or append to messages, divided into multiple
+// if idle send and set state to receiving_acc
 
 
 
@@ -118,40 +165,38 @@ int main(void)
 	fd_set connectionList; // List of file descriptors for sockets
 	int fdmax; // Maximum file descriptor number
 
+
+	/** Connection stuff **/
 	int serverSocket; // Listening socket descriptor
-	int newfd; // newly accept()ed socket descriptor
-	struct sockaddr_storage remoteaddr; // client address
+	struct sockaddr_storage remoteaddr; // Client address
 	socklen_t addrlen;
-
 	char remoteIP[INET6_ADDRSTRLEN];
-
-	int yes = 1; // for setsockopt() SO_REUSEADDR, below
-	int j, rv;
-
+	int yes = 1; // For setsockopt() SO_REUSEADDR, below
 	struct addrinfo hints, *ai, *p;
+	FD_ZERO(&connectionList); // Clear the master and temp sets
 
-	FD_ZERO(&connectionList); // clear the master and temp sets
-
-	// Create socket
+	// Get address information
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
-	if((rv = getaddrinfo(NULL, PORT, &hints, &ai)) != 0)
+	int rv = getaddrinfo(NULL, PORT, &hints, &ai);
+	if(rv != 0)
 	{
 		fprintf(stderr, "selectserver: %s\n", gai_strerror(rv));
 		exit(1);
 	}
 
+	// Bind socket
 	for(p = ai; p != NULL; p = p->ai_next)
 	{
 		serverSocket = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-		if (serverSocket < 0)
+		if(serverSocket < 0)
 		{
 			continue;
 		}
 
-		// lose the pesky "address already in use" error message
+		// Lose the pesky "address already in use" error message
 		setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
 
 		if(bind(serverSocket, p->ai_addr, p->ai_addrlen) < 0)
@@ -162,34 +207,31 @@ int main(void)
 
 		break;
 	}
-
-	// if we got here, it means we didn't get bound
 	if(p == NULL)
 	{
 		fprintf(stderr, "selectserver: failed to bind\n");
 		exit(2);
 	}
-
-	freeaddrinfo(ai); // all done with this
-
-	// listen
+	freeaddrinfo(ai); // All done with this
+	// Listen
 	if(listen(serverSocket, 10) == -1)
 	{
 		perror("listen");
 		exit(3);
 	}
 
-	// add the serverSocket to the master set
+
+	// Add the serverSocket to the connection list
 	FD_SET(serverSocket, &connectionList);
 
-	// keep track of the biggest file descriptor
-	fdmax = serverSocket; // so far, it's this one
+	// Keep track of the biggest file descriptor
+	fdmax = serverSocket; // So far, it's this one
 
 	// Create list of clients
 	Client *clients[10];
 	int numClients = 0;
 
-	// main loop
+	// Main listen loop
 	while(1)
 	{
 		// Listen on all connections untill something happens on them
@@ -205,7 +247,7 @@ int main(void)
 		{
 			// Get filedescriptor of new connection
 			addrlen = sizeof remoteaddr;
-			newfd = accept(serverSocket, (struct sockaddr *)&remoteaddr, &addrlen);
+			int newfd = accept(serverSocket, (struct sockaddr *)&remoteaddr, &addrlen);
 
 			if(newfd == -1)
 			{
