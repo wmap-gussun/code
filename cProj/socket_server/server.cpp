@@ -18,15 +18,15 @@
 
 #define PORT "3490"  // The port users will be connecting to
 
-#define MESSAGESIZE 1024 Max number of bytes per package
+#define MESSAGESIZE 1024 // Max number of bytes per package
 #define PACKAGESIZE MESSAGESIZE+sizeof(uint32_t) // Size of package
 
 
-enum Protocol
+enum PackageTypes
 {
-	ACC,
-	NEW_MESSAGE
-};
+	PACKAGE_ACC=1,
+	INTERFACE_INFO=2
+} PackageType;
 
 struct Package_new
 {
@@ -102,18 +102,19 @@ void Client::read()
 		}
 		else
 		{
-			if(readBuffer.type == 1) // New
+			printf("Typet %d\n", readBuffer.type);
+			if(readBuffer.type == PACKAGE_ACC) // New
 			{
-				printf("New message of %d parts with %d size\n", readBuffer.new_.parts, readBuffer.new_.size);
+				printf("New message of %d parts with %d size\n", readBuffer.new_.parts, readBuffer.new_.length);
 				// Prepare for new message
 				// Send acc
 			}
-			elseif(readBuffer.type == 2) // Message part
+			else if(readBuffer.type == 2) // Message part
 			{
 				printf("Message part %s\n", readBuffer.part_.buf);
 				// Send acc
 			}
-			elseif(readBuffer.type == 3) // Acc
+			else if(readBuffer.type == 3) // Acc
 			{
 				// Send worked!
 				// Send next message if any

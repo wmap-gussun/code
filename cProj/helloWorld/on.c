@@ -23,7 +23,6 @@
 
 // Blinks on RPi pin GPIO 11
 #define PIN RPI_V2_GPIO_P1_22
-#define PROTOCOL 17 //Protocol id
 int SLEEP = 720; // (833 - some overhead)
 
 void sendBit(int b, int s)
@@ -61,9 +60,9 @@ void send(int protocol, int id, int data)
 		// Send data
 		sendByte(data);
 		// Send parities
-		sendBit(parity(protocol), SLEEP);
-		sendBit(parity(id), SLEEP);
-		sendBit(parity(data), SLEEP);
+		sendBit(protocol&1, SLEEP);
+		sendBit(id&1, SLEEP);
+		sendBit(data&1, SLEEP);
 		// Send stop bit
 		sendBit(1, SLEEP);
 		// Set normal
@@ -72,17 +71,6 @@ void send(int protocol, int id, int data)
 		delay(30);
 	}
 };
-
-/**
- * Check parity, using voodo.
- */
-int parity(unsigned int x) {
-	unsigned int y;
-	y = x ^ (x >> 1);
-	y = y ^ (y >> 2);
-	y = y ^ (y >> 4);
-	return y & 1;
-}
 
 int main(int argc, char **argv)
 {
@@ -101,29 +89,9 @@ int main(int argc, char **argv)
 	bcm2835_gpio_write(PIN, 1);
 
 	// Blink
-	unsigned int data;
-	printf("Getting data \n");
-	if(argc > 1)
+	while (1)
 	{
-		data = atoi(argv[1]);
-	}
-	else
-		return 0;
-	printf("sending %d\n", data);
-	int i = 0;
-	while (i < 2000)
-	{
-		i++;
-		send(PROTOCOL, 2, data);
-		delay(1000);
-		send(PROTOCOL, 2, data+10);
-		delay(1000);
-		//printf("on\n");
-		//send(1, 2, 0);
-		//delay(1000);
-		//printf("of\n");
-		//send(1, 2, 100);
-		//delay(1000);
+		send(1, 2, 3);
 		//delay(500);
 		//send(1, 2, 50);
 		//delay(200);
